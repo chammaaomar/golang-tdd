@@ -102,6 +102,11 @@ func gameLoop(qaMap map[string]int, input io.Reader, output printer, scorePtr *i
 	return
 }
 
+// playGame controls the main game: greets, starts the loop, and
+// prints goodbye message. It is private because it's dependency
+// injected. There is a public version PlayGame that has all the
+// injected dependecies filled out and presents a simple public
+// interface
 func playGame(csvPath string, timer int, header bool, input io.Reader, sleepy sleeper, output printer) (int, error) {
 	var score int
 	done := make(chan int)
