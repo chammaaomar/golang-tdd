@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+
+	"gopkg.in/yaml.v2"
 )
 
 func defaultHandler() http.Handler {
@@ -45,12 +47,17 @@ func MapHandler(pathsToUrls map[string]string, fallback http.Handler) http.Handl
 //     - path: /some-path
 //       url: https://www.some-url.com/demo
 //
-// The only errors that can be returned all related to having
+// The only errors that can be returned all relate to having
 // invalid YAML data.
-//
-// See MapHandler to create a similar http.HandlerFunc via
-// a mapping of paths to urls.
 func YAMLHandler(yml []byte, fallback http.Handler) (http.HandlerFunc, error) {
-	// TODO: Implement this...
-	return nil, nil
+	mappings := make([]map[string]string, 0, 50)
+	combinedMapping := make(map[string]string)
+	err := yaml.Unmarshal(yml, &mappings)
+	if err != nil {
+		return nil, err
+	}
+	for _, routingPair := range mappings {
+		combinedMapping[routingPair["path"]] = routingPair["url"]
+	}
+	return MapHandler(combinedMapping, fallback), nil
 }
