@@ -58,3 +58,30 @@ func TestYAMLHandler(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 	})
 }
+
+func TestJSONHandler(t *testing.T) {
+	t.Run("JSONHandler should redirect a shortened URL present in the JSON string", func(t *testing.T) {
+		jsonDirectory := `
+[
+	{
+		"path": "/urlshort",
+		"url": "https://github.com/gophercises/urlshort"
+	},
+	{
+		"path": "/urlshort-final",
+		"url": "https://github.com/gophercises/urlshort/tree/solution"
+	}
+]
+`
+		rr := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/urlshort-final", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler, err := JSONHandler([]byte(jsonDirectory), defaultHandler())
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler.ServeHTTP(rr, req)
+	})
+}

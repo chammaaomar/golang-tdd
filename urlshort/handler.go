@@ -1,12 +1,19 @@
 package urlshort
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
 
 	"gopkg.in/yaml.v2"
 )
+
+type pathURL struct {
+	Path string
+	URL  string
+}
 
 func defaultHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -50,14 +57,50 @@ func MapHandler(pathsToUrls map[string]string, fallback http.Handler) http.Handl
 // The only errors that can be returned all relate to having
 // invalid YAML data.
 func YAMLHandler(yml []byte, fallback http.Handler) (http.HandlerFunc, error) {
-	mappings := make([]map[string]string, 0, 50)
+	// parse yaml into a slice of maps, as appropriate for the expected
+	// format
+	mappings := make([]map[string]string, 0, 10)
 	combinedMapping := make(map[string]string)
 	err := yaml.Unmarshal(yml, &mappings)
 	if err != nil {
 		return nil, err
 	}
+	// combine the maps in the slice into a single map
 	for _, routingPair := range mappings {
 		combinedMapping[routingPair["path"]] = routingPair["url"]
 	}
 	return MapHandler(combinedMapping, fallback), nil
+}
+
+// JSONHandler will parse the provided JSON and then return
+// an http.HandlerFunc (which also implements http.Handler)
+// that will attempt to map any paths to their corresponding
+// URL. If the path is not provided in the JSON, then the
+// fallback http.Handler will be called instead.
+//
+// JSON is expected to be in the format:
+//
+//	[
+//		{
+//			"path": "/some-path",
+//			"url": "https://www.some-url.com/demo"
+//		}
+//	]
+//
+// The only errors that can be returned all relate to having
+// invalid JSON data.
+func JSONHandler(jsonData []byte, fallback http.Handler) (http.HandlerFunc, error) {
+	mappings := make([]pathURL, 0, 10)
+	jsonReader := bytes.NewReader(jsonData)
+	decoder := json.NewDecoder(jsonReader)
+	err := decoder.Decode(&mappings)
+	if err != nil {
+		return nil, err
+	}
+	mapping := make(map[string]string)
+	// combine all mappings extracted from json into single mapping
+	for _, routingPair := range mappings {
+		mapping[routingPair.Path] = routingPair.URL
+	}
+	return MapHandler(mapping, fallback), nil
 }
