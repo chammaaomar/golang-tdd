@@ -7,6 +7,8 @@ import (
 	"html"
 	"net/http"
 
+	"github.com/boltdb/bolt"
+
 	"gopkg.in/yaml.v2"
 )
 
@@ -103,4 +105,37 @@ func JSONHandler(jsonData []byte, fallback http.Handler) (http.HandlerFunc, erro
 		mapping[routingPair.Path] = routingPair.URL
 	}
 	return MapHandler(mapping, fallback), nil
+}
+
+// BoltDBHandler will return an http.HandlerFunc (which also
+// implements http.Handler) that will attempt to map any
+// paths (keys in the BoltDB) to their corresponding URL (values
+// that each key in the BoltDB points to, in string format).
+// If the path is not provided in the BoltDB, then the fallback
+// http.Handler will be called instead.
+func BoltDBHandler(db *bolt.DB, bucket string, fallback http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		urlBuf := bytes.NewBuffer(make([]byte, 0, 10))
+		err := db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte(bucket))
+			tempURL := b.Get([]byte(html.EscapeString(r.URL.Path)))
+			_, err := urlBuf.Write(tempURL)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fallback.ServeHTTP(w, r)
+			return
+		}
+		url := string(urlBuf.Bytes())
+		if len(url) == 0 {
+			fallback.ServeHTTP(w, r)
+			return
+		}
+		http.Redirect(w, r, url, http.StatusFound)
+		return
+	}
 }
