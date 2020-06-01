@@ -118,6 +118,9 @@ func BoltDBHandler(db *bolt.DB, bucket string, fallback http.Handler) http.Handl
 		urlBuf := bytes.NewBuffer(make([]byte, 0, 10))
 		err := db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(bucket))
+			if b == nil {
+				return bolt.ErrBucketNotFound
+			}
 			tempURL := b.Get([]byte(html.EscapeString(r.URL.Path)))
 			_, err := urlBuf.Write(tempURL)
 			if err != nil {
