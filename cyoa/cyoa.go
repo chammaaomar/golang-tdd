@@ -3,52 +3,32 @@ package cyoa
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
+	"strings"
 )
 
-var storyTempl = `
-<!DOCTYPE html>
-<html lang="en">
-	<head>
-		<meta charset="UTF-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<title>Choose Your Own Adventure!</title>
-	</head>
-	<body>
-		
-		<h1>{{.Title}}</h1>
-		{{range .Story}}
-		<p>{{.}}</p>
-		{{end}}
+var errNoJSONFound = errors.New("No .json files found in this directory")
 
-		<ul>
-			{{range .Options}}
-			<li>
-				<a href="%s/{{.Arc}}"><p>{{.Text}}</p>
-			</li>
-			{{end}}
-		</ul>
-		</body>
-</html>
-`
-
-type StoryArc struct {
+type storyArc struct {
 	Title   string
 	Story   []string
-	Options []Option
+	Options []option
 }
 
-type Option struct {
+type option struct {
 	Text string
 	Arc  string
 }
 
-func ReadFile(path string) ([]byte, error) {
+func readFile(path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -60,10 +40,10 @@ func ReadFile(path string) ([]byte, error) {
 	return jsonBytes, nil
 }
 
-// ParseJSONstory parses a story encoded as a JSON into a Go map of
-// StoryArc structs. The expected JSON format is
+// parseJSONstory parses a story encoded as a JSON into a Go map of
+// storyArc structs. The expected JSON format is
 // {
-// 		"[DYNAMIC ARC TITLE]": {
+// 		"[ARC TITLE]": {
 // 			"title": "[TITLE]",
 //			"story": [
 //				"[PARAGRAPH]",
@@ -79,8 +59,8 @@ func ReadFile(path string) ([]byte, error) {
 //		},
 //		...
 // }
-func ParseJSONstory(jsonBytes []byte) (map[string]StoryArc, error) {
-	parsedJSON := make(map[string]StoryArc)
+func parseJSONstory(jsonBytes []byte) (map[string]storyArc, error) {
+	parsedJSON := make(map[string]storyArc)
 	jsonBuf := bytes.NewBuffer(jsonBytes)
 	decoder := json.NewDecoder(jsonBuf)
 
@@ -94,8 +74,10 @@ func ParseJSONstory(jsonBytes []byte) (map[string]StoryArc, error) {
 	return parsedJSON, nil
 }
 
-// AdventureHandler does stuff
-func AdventureHandler(handler *http.ServeMux, parsedStory map[string]StoryArc, storyTemplate, baseURL string) (*http.ServeMux, error) {
+// addAdventurePages takes a handler and adds at the base url handler functions
+// for the story arcs provided in the parsed story map. The handler functions
+// are registered at baseURL/arc-title, for every story arc.
+func addAdventurePages(handler *http.ServeMux, parsedStory map[string]storyArc, storyTemplate, baseURL string) (*http.ServeMux, error) {
 	body := template.Must(template.New("StoryArc").Parse(storyTemplate))
 	if handler == nil {
 		handler = http.NewServeMux()
@@ -116,5 +98,61 @@ func AdventureHandler(handler *http.ServeMux, parsedStory map[string]StoryArc, s
 		}(buf.Bytes())
 		buf.Reset()
 	}
+	return handler, nil
+}
+
+func AddAdventures(handler *http.ServeMux, dir, baseURL, storyTemplate string) (http.Handler, error) {
+	if handler == nil {
+		handler = http.NewServeMux()
+	}
+	files, err := filepath.Glob(path.Join(dir, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, errNoJSONFound
+	}
+	for _, file := range files {
+		filename := strings.Split(path.Base(file), ".json")[0]
+		jsonBytes, err := readFile(file)
+		if err != nil {
+			return nil, err
+		}
+		parsedJSON, err := parseJSONstory(jsonBytes)
+		if err != nil {
+			return nil, err
+		}
+		path := fmt.Sprintf("%s/%s", baseURL, filename)
+		templ := fmt.Sprintf(storyTemplate, path)
+		_, err = addAdventurePages(handler, parsedJSON, templ, path)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return handler, nil
+
+}
+
+// AddStoriesHomePage adds to the handler a handle function for the path
+// url. The handle function serves the template templ. The top-level (initial)
+//context in the template is the string slice storyNames, which is the only
+// restriction on the template.
+func AddStoriesHomePage(handler *http.ServeMux, storyNames []string, url, templ string) (*http.ServeMux, error) {
+	if handler == nil {
+		handler = http.NewServeMux()
+	}
+	homeBody := template.Must(template.New("stories").Funcs(template.FuncMap{"toTitle": toTitle}).Parse(templ))
+	buf := bytes.NewBuffer(make([]byte, 10))
+	err := homeBody.Execute(buf, storyNames)
+	if err != nil {
+		return nil, err
+	}
+	handler.HandleFunc(url, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write(buf.Bytes())
+	})
+
 	return handler, nil
 }
