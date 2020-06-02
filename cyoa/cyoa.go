@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -17,13 +16,15 @@ import (
 
 var errNoJSONFound = errors.New("No .json files found in this directory")
 
-type storyArc struct {
+// StoryArc is used to deseralize a choose-your-own-adventure json
+type StoryArc struct {
 	Title   string
 	Story   []string
-	Options []option
+	Options []Option
 }
 
-type option struct {
+// Option represents a user option in a choose-your-own-adventure
+type Option struct {
 	Text string
 	Arc  string
 }
@@ -41,7 +42,7 @@ func readFile(path string) ([]byte, error) {
 }
 
 // parseJSONstory parses a story encoded as a JSON into a Go map of
-// storyArc structs. The expected JSON format is
+// StoryArc structs. The expected JSON format is
 // {
 // 		"[ARC TITLE]": {
 // 			"title": "[TITLE]",
@@ -59,8 +60,8 @@ func readFile(path string) ([]byte, error) {
 //		},
 //		...
 // }
-func parseJSONstory(jsonBytes []byte) (map[string]storyArc, error) {
-	parsedJSON := make(map[string]storyArc)
+func parseJSONstory(jsonBytes []byte) (map[string]StoryArc, error) {
+	parsedJSON := make(map[string]StoryArc)
 	jsonBuf := bytes.NewBuffer(jsonBytes)
 	decoder := json.NewDecoder(jsonBuf)
 
@@ -74,19 +75,18 @@ func parseJSONstory(jsonBytes []byte) (map[string]storyArc, error) {
 	return parsedJSON, nil
 }
 
-// addAdventurePages takes a handler and adds at the base url handler functions
-// for the story arcs provided in the parsed story map. The handler functions
-// are registered at baseURL/arc-title, for every story arc.
-func addAdventurePages(handler *http.ServeMux, parsedStory map[string]storyArc, storyTemplate, baseURL string) (*http.ServeMux, error) {
+// addAdventurePages registers handler functions for a choose-your-own-adventure
+// story on handler. The handler functions are registered at baseURL/arc-titles.
+// baseURL can be, e.g. the story title. The response body is the template
+// storyTemplate which has as a top-level context the parsedStory map. See
+// the StoryArc struct for details on the exported fields.
+func addAdventurePages(handler *http.ServeMux, parsedStory map[string]StoryArc, storyTemplate, baseURL string) error {
 	body := template.Must(template.New("StoryArc").Parse(storyTemplate))
-	if handler == nil {
-		handler = http.NewServeMux()
-	}
 	for title, structBody := range parsedStory {
 		buf := bytes.NewBuffer(make([]byte, 10))
 		err := body.Execute(buf, structBody)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		func(respBody []byte) {
 			// copy the template body by value
@@ -98,13 +98,19 @@ func addAdventurePages(handler *http.ServeMux, parsedStory map[string]storyArc, 
 		}(buf.Bytes())
 		buf.Reset()
 	}
-	return handler, nil
+	return nil
 }
 
-func AddAdventures(handler *http.ServeMux, dir, baseURL, storyTemplate string) (http.Handler, error) {
-	if handler == nil {
-		handler = http.NewServeMux()
-	}
+// AdventuresHandler gets all the choose-your-own adventure json files
+// in dir. It returns an http mux that, for every parsed json, has
+// a handler function at  /filename/arc-title for every arc in the json.
+// The html response of the handler function is the storyTemplate.
+// storyTemplate HAS TO have a formatting directive %s, which will respectively
+// take the filename of each parsed json. When storyTemplate is executed,
+// it will have the top-level context be the StoryArc structs corresponding
+// to the deserialized jsons from dir.
+func AdventuresHandler(dir, storyTemplate string) (*http.ServeMux, error) {
+	handler := http.NewServeMux()
 	files, err := filepath.Glob(path.Join(dir, "*.json"))
 	if err != nil {
 		return nil, err
@@ -122,9 +128,9 @@ func AddAdventures(handler *http.ServeMux, dir, baseURL, storyTemplate string) (
 		if err != nil {
 			return nil, err
 		}
-		path := fmt.Sprintf("%s/%s", baseURL, filename)
-		templ := fmt.Sprintf(storyTemplate, path)
-		_, err = addAdventurePages(handler, parsedJSON, templ, path)
+		path := fmt.Sprintf("/%s", filename)
+		templ := fmt.Sprintf(storyTemplate, filename)
+		err = addAdventurePages(handler, parsedJSON, templ, path)
 		if err != nil {
 			return nil, err
 		}
@@ -134,21 +140,23 @@ func AddAdventures(handler *http.ServeMux, dir, baseURL, storyTemplate string) (
 
 }
 
-// AddStoriesHomePage adds to the handler a handle function for the path
-// url. The handle function serves the template templ. The top-level (initial)
-//context in the template is the string slice storyNames, which is the only
-// restriction on the template.
-func AddStoriesHomePage(handler *http.ServeMux, storyNames []string, url, templ string) (*http.ServeMux, error) {
-	if handler == nil {
-		handler = http.NewServeMux()
-	}
+// HomePageHandler returns a handler with a handler function mounted
+// at "/". The HTML response is the template templ, which will have as
+// a top-level context the storyNames slice.
+func HomePageHandler(storyNames []string, templ string) (*http.ServeMux, error) {
+	handler := http.NewServeMux()
 	homeBody := template.Must(template.New("stories").Funcs(template.FuncMap{"toTitle": toTitle}).Parse(templ))
 	buf := bytes.NewBuffer(make([]byte, 10))
 	err := homeBody.Execute(buf, storyNames)
 	if err != nil {
 		return nil, err
 	}
-	handler.HandleFunc(url, func(w http.ResponseWriter, r *http.Request) {
+	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(r.URL.Path))
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
 		w.Write(buf.Bytes())

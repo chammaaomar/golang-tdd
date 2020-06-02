@@ -20,7 +20,7 @@ var storyTempl = `
 		<ul>
 			{{range .Options}}
 			<li>
-				<a href="%s/{{.Arc}}"><p>{{.Text}}</p>
+				<a href="/stories/%s/{{.Arc}}"><p>{{.Text}}</p>
 			</li>
 			{{end}}
 		</ul>

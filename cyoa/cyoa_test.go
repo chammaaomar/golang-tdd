@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestAdventurePages(t *testing.T) {
+func TestAddAdventurePages(t *testing.T) {
 	t.Run("User should be shown the 'intro' arc when requesting /the-little-blue-gopher/intro", func(t *testing.T) {
 		expectedContents := map[string]string{
 			"title":     "The Little Blue Gopher",
@@ -21,22 +21,15 @@ func TestAdventurePages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		jsonBytes, err := readFile("stories/the-little-blue-gopher.json")
-		if err != nil {
-			t.Fatal(err)
-		}
-		adventure, err := parseJSONstory(jsonBytes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		testTempl := fmt.Sprintf(storyTempl, "/the-little-blue-gopher")
-		handler, err := addAdventurePages(nil, adventure, testTempl, "/the-little-blue-gopher")
+
+		handler, err := AdventuresHandler("stories/", fmt.Sprintf(storyTempl, "/the-little-blue-gopher"))
 
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		handler.ServeHTTP(rr, req)
+
 		if code := rr.Code; code != http.StatusOK {
 			t.Fatalf("Expected status code %d, got %d", http.StatusOK, code)
 		}
@@ -70,14 +63,14 @@ func TestParseJSONstory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := map[string]storyArc{
-		"intro": storyArc{
+	expected := map[string]StoryArc{
+		"intro": StoryArc{
 			Title: "The Little Blue Gopher",
 			Story: []string{
 				"Once upon a time, long long ago, there was a little blue gopher.",
 			},
-			Options: []option{
-				option{
+			Options: []Option{
+				Option{
 					Text: "That story about the Sticky Bandits isn't real.",
 					Arc:  "new-york",
 				},
@@ -100,9 +93,9 @@ func TestHomePage(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		expectedContent := "<li><a href=\"/the-little-blue-gopher/intro\"><p>The Little Blue Gopher</p>"
+		expectedContent := "<li><a href=\"/stories/the-little-blue-gopher/intro\"><p>The Little Blue Gopher</p>"
 
-		handler, err := AddStoriesHomePage(nil, []string{"the-little-blue-gopher"}, "/", fmt.Sprintf(homeTempl, ""))
+		handler, err := HomePageHandler([]string{"the-little-blue-gopher"}, fmt.Sprintf(homeTempl, "/stories"))
 
 		if err != nil {
 			t.Fatal(err)
@@ -122,13 +115,15 @@ func TestHomePage(t *testing.T) {
 		// simulating navigation or user selecting an adventure
 		// expect the user to be taken to the page
 
-		_, err = AddAdventures(handler, "stories/", "", storyTempl)
+		advHandler, err := AdventuresHandler("stories/", storyTempl)
 
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		req, err = http.NewRequest("GET", "/the-little-blue-gopher/intro", nil)
+		handler.Handle("/stories/", http.StripPrefix("/stories", advHandler))
+
+		req, err = http.NewRequest("GET", "/stories/the-little-blue-gopher/intro", nil)
 
 		if err != nil {
 			t.Fatal(err)
@@ -153,6 +148,5 @@ func TestHomePage(t *testing.T) {
 				t.Logf("Expected %q to be present, not found", k)
 			}
 		}
-
 	})
 }
